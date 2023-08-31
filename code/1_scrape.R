@@ -159,73 +159,27 @@ grab_rev <- possibly(function(text){
   },
   otherwise = tibble(state = "Error"))
 
-dat_2016_2021 <- future_map_dfr(text_list, grab_rev, .progress=T) %>% 
+dat_samhsa <- future_map_dfr(text_list, grab_rev, .progress=T) %>% 
   mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
 
-dat_2016_2021 %<>%
+
+# Cleaning & Saving -------------------------------------------------------
+
+# Adding labels and getting numeric data from strings
+dat_samhsa %<>%
+  mutate(
+    across(.cols = tot_smha:mh_pct_community, 
+           \(x) str_remove_all(x, "[:punct:]|\\$")),
+    across(.cols = year:mh_pct_community,
+           as.numeric)
+  ) %>% 
   set_variable_labels(
-    tot_smha = "Total SMHA Mental Health Expenditure",
-    pc_smha = "Per Capita Total SMHA Mental Health Expenditures",
-    mh_blockgrant = "Mental Health Block Grant Expenditures",
-    mh_pc_community = "Per Capita Community MH Expenditures",
-    mh_pct_community = "Community Percent of Total SMHA Spending"
+    tot_smha = "Total SMHA Mental Health Expenditure ($)",
+    pc_smha = "Per Capita Total SMHA Mental Health Expenditures ($)",
+    mh_blockgrant = "Mental Health Block Grant Expenditures ($)",
+    mh_pc_community = "Per Capita Community MH Expenditures ($)",
+    mh_pct_community = "Community Percent of Total SMHA Spending (%)"
   )
 
-dat_2016_2021 %>% 
-  mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
-
-saveRDS(dat_2016_2021, here("data", "samhsa_data_2010_2011.Rds"))
-
-
-
-# Junkyard ----------------------------------------------------------------
-
-str_extract(href_list$pdf_url[1], "(?<=[:digit:]/).+(?=\\.pdf)")
-
-year <- str_extract(href_list$pdf_url[1], "[:digit:]{2}(?=[:punct:]uniform)")
-
-test <- tibble(link = grab_href(html, ".download-file-link a")) %>% 
-  mutate(link = glue("https://www.samhsa.gov/{link}"))
-
-download.file(href_list$pdf_url[1],
-              destfile=here("data", "test.pdf"),
-              mode="wb")
-
-href_list$pdf_url[1]
-
-# https://www.samhsa.gov/data/report/2021-uniform-reporting-system-urs-table-arizona
-
-test <- tibble(x = 1:20)
-
-# 
-# grab_rev(here("data", "samhsa_Alaska_2021.pdf"))
-# 
-# str_squish(text_split[3])
-# 
-# txt <- pdf_text(here("data", "samhsa_Alaska_2020.pdf"))
-# 
-# 
-# txt_matrix <- txt %>% 
-#   str_subset("State Revenue Expenditure Data") 
-#   
-# txt_matrix
-# 
-# tibble(
-#   state = str_extract(txt_matrix, "(?<=\\n).+(?=\\n)"),
-#   year = str_extract(txt_matrix, "[:digit:]{4}"),
-#   tot_smha = str_extract(txt_matrix, 
-#                          "(?<=Total SMHA Mental Health Expenditures).+(?=\\n)"),
-#   pc_smha = str_extract(txt_matrix, 
-#                         "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
-#   mh_blockgrant = str_extract(txt_matrix, 
-#                               "(?<=Mental Health Block Grant Expenditures).+(?=\\n)"),
-#   mh_community = str_extract(txt_matrix, 
-#                              "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
-#   mh_pc_community = str_extract(txt_matrix, 
-#                                 "(?<=Community Percent of Total SMHA Spending).+(?=\\n)"),
-#   mh_pct_community = str_extract(txt_matrix, 
-#                                  "(?<=Total SMHA Mental Health Expenditures).+(?=\\n)")
-#   ) %>% 
-#   mutate(across(everything(), str_squish))
-# 
-# str_view(txt_matrix, "Expenditure")
+# Saving
+saveRDS(dat_samhsa, here("data", "samhsa_data_2010_2011.Rds"))

@@ -18,6 +18,7 @@ library(labelled)
 library(magrittr)
 library(furrr)
 library(tictoc)
+library(renv)
 here::i_am("code/1_scrape.R")
 library(here)
 

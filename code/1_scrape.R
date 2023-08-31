@@ -40,15 +40,15 @@ grab_href <- possibly(
 # This may need to be adjusted according to CPU of user
 plan(multisession, workers = 12)
 
-# States/Territories to Iterate Over --------------------------------------
 
+# States/Territories to Iterate Over --------------------------------------
 
 states <- readRDS(here("data", "states.Rds")) %>% 
   select(state) %>% # Getting state strings ready for scraping SAMHSA
   mutate(st_str = str_to_lower(state),
-         st_str = str_replace(st_str, " ", "-"),
+         st_str = str_replace_all(st_str, " ", "-"),
          st_str = case_when(
-           st_str == "district-of columbia" ~ "dc",
+           st_str == "district-of-columbia" ~ "dc",
            TRUE ~ st_str 
          ))
 
@@ -68,7 +68,6 @@ territories <- tibble(st_str = c("american-samoa",
 
 states <- bind_rows(states, territories)
 
-
 # Downloading PDFs --------------------------------------------------------
 
 # Getting the download links for each report
@@ -77,14 +76,29 @@ href_list <- map_dfr(states$st_str, \(x){
   map_dfr(2010:2021, \(y){
     
     html <- safe_read_html(
-      case_when(y >= 2016 ~ 
-                  glue("https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-table-{x}"),
-                y <= 2015 & y >= 2014 ~
-                  glue("https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-table-{x}"),
-                y == 2012 ~ 
-                  glue("https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-tables-{x}"),
-                y <= 2011 ~ 
-                  glue("https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-output-tables-{x}")))
+      case_when(
+        y >= 2016 ~
+          glue(
+            "https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-table-{x}"
+          ),
+        y <= 2015 & y >= 2014 ~
+          glue(
+            "https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-table-{x}"
+          ),
+        y == 2013 ~
+          glue(
+            "https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-tables-{x}"
+          ),
+        y == 2012 ~
+          glue(
+            "https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-tables-{x}"
+          ),
+        y <= 2011 ~
+          glue(
+            "https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-output-tables-{x}"
+          )
+      )
+    )
     
     table <- tibble(
       st_str = x,
@@ -99,7 +113,7 @@ href_list <- map_dfr(states$st_str, \(x){
       mutate(
         pdf_url = glue("https://www.samhsa.gov{pdf_url}"),
         pdf_url = case_when( 
-          st_str == "dc" & year == 2021 # There is an error w/ the 2021 dc folder structure
+          st_str == "dc" & year == 2021 # There is an typo in the 2021 dc folder structure
           ~ "https://www.samhsa.gov/data/report/021-uniform-reporting-system-urs-table-dc",
           TRUE ~ pdf_url
         )
@@ -112,11 +126,11 @@ href_list <- map_dfr(states$st_str, \(x){
 href_list <- href_list %>% 
   mutate(st_year = glue("{st_str}{year}"))
 
-saveRDS(href_list3, here("data", "href_list.Rds"))
+saveRDS(href_list, here("data", "href_list.Rds"))
 beep()
 
 # Downloading the reports
-walk2(href_list2$pdf_url, href_list2$st_year, \(link, st_yr){
+walk2(href_list$pdf_url, href_list$st_year, \(link, st_yr){
     download.file(link,
                   destfile = here("data", "pdf", glue("samhsa_{st_yr}.pdf")),
                   mode="wb")
@@ -126,11 +140,11 @@ beep()
 
 # Scraping PDFs -----------------------------------------------------------
 
-text_list <- list.files(path=here("data", "pdf_2016_2021"),
+text_list <- list.files(path=here("data", "pdf"),
                         pattern = "samhsa.+",
                         full.names=T)
 
-# Function to extract 2016-2021 tables
+# Function to extract revenue/expenditures table
 grab_rev <- possibly(function(text){
   
   print(text)
@@ -183,3 +197,18 @@ dat_samhsa %<>%
 
 # Saving
 saveRDS(dat_samhsa, here("data", "samhsa_data_2010_2011.Rds"))
+
+
+# Coverage Check ---------------------------------------------------------
+
+coverage <- dat_samhsa %>% 
+  group_by(state) %>% 
+  summarize(cov = list(unique(year)),
+            cov_n = length(unlist(cov)))
+
+full_cov <- tibble(state = unique(states$state)) %>% 
+  expand(state, year=2010:2021)
+
+missing <- anti_join(full_cov, dat_samhsa)
+
+length(unlist(coverage$cov[1]))

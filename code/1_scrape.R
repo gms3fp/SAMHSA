@@ -13,6 +13,9 @@ library(glue)
 library(purrr)
 library(janitor)
 library(pdftools)
+library(beepr)
+library(labelled)
+library(magrittr)
 library(furrr)
 library(tictoc)
 here::i_am("code/1_scrape.R")
@@ -67,22 +70,28 @@ states <- bind_rows(states, territories)
 
 # Downloading PDFs --------------------------------------------------------
 
-# 2016-2021 (same folder structure)
-
-# Getting pdf links from each page (the pdf links are weirdly organized)
-href_list <- map_dfr(states$st_str[1:2], \(x){
+# Getting the download links for each report
+href_list <- map_dfr(states$st_str, \(x){
   
-  map_dfr(2016:2021, \(y){
+  map_dfr(2010:2021, \(y){
     
     html <- safe_read_html(
-      glue("https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-table-{x}"))
+      case_when(y >= 2016 ~ 
+                  glue("https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-table-{x}"),
+                y <= 2015 & y >= 2014 ~
+                  glue("https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-table-{x}"),
+                y == 2012 ~ 
+                  glue("https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-tables-{x}"),
+                y <= 2011 ~ 
+                  glue("https://www.samhsa.gov/data/report/{y}-cmhs-uniform-reporting-system-urs-output-tables-{x}")))
     
     table <- tibble(
       st_str = x,
       year = y,
+      st_year = glue("{x}{y}"),
       landing_url =
         glue(
-          "https://www.samhsa.gov/data/report/2021-uniform-reporting-system-urs-table-{x}"
+          "https://www.samhsa.gov/data/report/{y}-uniform-reporting-system-urs-table-{x}"
         ),
       pdf_url = grab_href(html, ".download-file-link a")
     ) %>%
@@ -96,36 +105,79 @@ href_list <- map_dfr(states$st_str[1:2], \(x){
       ) %>%
       left_join(states)
     })
-  }) 
+  }) %>% 
+  filter(!str_detect(pdf_url, "Error"))
 
-# Finally Download
-walk2(href_list$pdf_url, href_list$year, \(link, yr){
-    state <- str_extract(link, "(?<=[:digit:]/).+(?=\\.pdf)")
+href_list <- href_list %>% 
+  mutate(st_year = glue("{st_str}{year}"))
+
+saveRDS(href_list3, here("data", "href_list.Rds"))
+beep()
+
+# Downloading the reports
+walk2(href_list2$pdf_url, href_list2$st_year, \(link, st_yr){
     download.file(link,
-                  destfile = here("data", glue("samhsa_{state}_{yr}.pdf")),
+                  destfile = here("data", "pdf", glue("samhsa_{st_yr}.pdf")),
                   mode="wb")
   })
+beep()
 
 
 # Scraping PDFs -----------------------------------------------------------
 
-text <- pdf_text(here("data", "samhsa_Alabama_2020.pdf"))
-text_split <- str_split(text, "\n") %>% 
-  str_trim()
-?str_split
-text_split[[3]]
+text_list <- list.files(path=here("data", "pdf_2016_2021"),
+                        pattern = "samhsa.+",
+                        full.names=T)
 
+# Function to extract 2016-2021 tables
+grab_rev <- possibly(function(text){
+  
+  print(text)
 
+  text_matrix <- pdf_text(text) %>% 
+    str_subset("State Revenue Expenditure Data") 
+  
+  tibble(
+    state = str_extract(text_matrix, "(?<=\\n).+(?=\\n)"),
+    year = str_extract(text_matrix, "[:digit:]{4}"),
+    tot_smha = str_extract(text_matrix, 
+                           "(?<=[:digit:]{4} Total SMHA Mental Health Expenditure).+(?=\\n)"),
+    pc_smha = str_extract(text_matrix, 
+                          "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
+    mh_blockgrant = str_extract(text_matrix, 
+                                "(?<=Mental Health Block Grant).+(?=\\n)"),
+    # mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"),
+    mh_community = str_extract(text_matrix, 
+                               "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
+    mh_pc_community = str_extract(text_matrix, 
+                                  "(?<=Per Capita Community MH Expenditures).+(?=\\n)"),
+    mh_pct_community = str_extract(text_matrix, 
+                                   "(?<=Community Percent of Total SMHA Spending).+(?=\\n)")
+  ) %>% 
+    mutate(across(everything(), str_squish))
+  },
+  otherwise = tibble(state = "Error"))
 
+dat_2016_2021 <- future_map_dfr(text_list, grab_rev, .progress=T) %>% 
+  mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
 
+dat_2016_2021 %<>%
+  set_variable_labels(
+    tot_smha = "Total SMHA Mental Health Expenditure",
+    pc_smha = "Per Capita Total SMHA Mental Health Expenditures",
+    mh_blockgrant = "Mental Health Block Grant Expenditures",
+    mh_pc_community = "Per Capita Community MH Expenditures",
+    mh_pct_community = "Community Percent of Total SMHA Spending"
+  )
 
+dat_2016_2021 %>% 
+  mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
 
-
+saveRDS(dat_2016_2021, here("data", "samhsa_data_2010_2011.Rds"))
 
 
 
 # Junkyard ----------------------------------------------------------------
-
 
 str_extract(href_list$pdf_url[1], "(?<=[:digit:]/).+(?=\\.pdf)")
 
@@ -143,3 +195,36 @@ href_list$pdf_url[1]
 # https://www.samhsa.gov/data/report/2021-uniform-reporting-system-urs-table-arizona
 
 test <- tibble(x = 1:20)
+
+# 
+# grab_rev(here("data", "samhsa_Alaska_2021.pdf"))
+# 
+# str_squish(text_split[3])
+# 
+# txt <- pdf_text(here("data", "samhsa_Alaska_2020.pdf"))
+# 
+# 
+# txt_matrix <- txt %>% 
+#   str_subset("State Revenue Expenditure Data") 
+#   
+# txt_matrix
+# 
+# tibble(
+#   state = str_extract(txt_matrix, "(?<=\\n).+(?=\\n)"),
+#   year = str_extract(txt_matrix, "[:digit:]{4}"),
+#   tot_smha = str_extract(txt_matrix, 
+#                          "(?<=Total SMHA Mental Health Expenditures).+(?=\\n)"),
+#   pc_smha = str_extract(txt_matrix, 
+#                         "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
+#   mh_blockgrant = str_extract(txt_matrix, 
+#                               "(?<=Mental Health Block Grant Expenditures).+(?=\\n)"),
+#   mh_community = str_extract(txt_matrix, 
+#                              "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
+#   mh_pc_community = str_extract(txt_matrix, 
+#                                 "(?<=Community Percent of Total SMHA Spending).+(?=\\n)"),
+#   mh_pct_community = str_extract(txt_matrix, 
+#                                  "(?<=Total SMHA Mental Health Expenditures).+(?=\\n)")
+#   ) %>% 
+#   mutate(across(everything(), str_squish))
+# 
+# str_view(txt_matrix, "Expenditure")

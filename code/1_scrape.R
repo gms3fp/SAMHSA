@@ -151,6 +151,7 @@ text_list <- list.files(path=here("data", "pdf"),
                         pattern = "samhsa.+",
                         full.names=T)
 
+
 # Function to extract revenue/expenditures table
 grab_rev <- possibly(function(text){
   
@@ -161,7 +162,7 @@ grab_rev <- possibly(function(text){
   
   tibble(
     state = str_extract(text_matrix, "(?<=\\n).+(?=\\n)"),
-    year = str_extract(text_matrix, "[:digit:]{4}"),
+    year = str_extract(text_matrix, "(?<=FY )[:digit:]{4}(?= Mental)"),
     tot_smha = str_extract(text_matrix, 
                            "(?<=[:digit:]{4} Total SMHA Mental Health Expenditure).+(?=\\n)"),
     pc_smha = str_extract(text_matrix, 
@@ -192,7 +193,7 @@ grab_rev_17 <- possibly(function(text){
   
   tibble(
     state = str_extract(text_matrix, "(?<=STATE: ).+(?=\\n)"),
-    year = str_extract(text_matrix, "[:digit:]{4}"),
+    year = str_extract(text_matrix, "(?<=Finance [:punct:])[:digit:]{4}(?=[:punct:])"),
     tot_smha = str_extract(text_matrix, 
                            "(?<=Total SMHA Expenditures).+(?=\\n)"),
     mh_community = str_extract(text_matrix, 
@@ -208,23 +209,27 @@ dat_samhsa_2 <- future_map_dfr(str_subset(text_list, "2017"), grab_rev_17, .prog
       str_remove_all(x, "[:punct:]|\\$")})
   )
 
+text <- pdf_text(here("data", "pdf", "2009", "Washington.pdf")) %>% 
+  str_subset("State Summary Report") 
+
+str_extract(text, "(?<=Block Grant ).+(?=\\n)")
 # Function for 2008-2010 tables
 grab_rev_08 <- possibly(function(text){
   
   print(text)
   
   text_matrix <- pdf_text(text) %>% 
-    str_subset("Basic Measure: State Mental Health Finance") 
+    str_subset("State Summary Report") 
   
   tibble(
-    state = str_extract(text_matrix, "(?<=\\n).+(?=\\n)"),
-    year = str_extract(text_matrix, "[:digit:]{4}"),
-    tot_smha = str_extract(text_matrix, 
-                           "(?<=[:digit:]{4} Total SMHA Mental Health Expenditures).+(?=\\n)"),
+    state = str_extract(text_matrix, "(?<= Report\\n\\n).+(?=\\n)"),
+    year = str_extract(text_matrix, "(?<=FY )[:digit:]{4}(?= Mental)"),
+    tot_smha = str_trim(str_extract(text_matrix, 
+                           "(?<=Total SMHA Mental Health Expenditure[:alpha:]?).+(?=\\n)")),
     pc_smha = str_extract(text_matrix, 
                           "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
     mh_blockgrant = str_extract(text_matrix, 
-                                "(?<=Mental Health Block Grant).+(?=\\n)"),
+                                "(?<=Block Grant ).+(?=\\n)"),
     mh_community = str_extract(text_matrix, 
                                "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
     mh_pc_community = str_extract(text_matrix, 
@@ -236,49 +241,51 @@ grab_rev_08 <- possibly(function(text){
 },
 otherwise = tibble(state = "Error"))
 
-# Grabbing 2007-2009 which came as zip files
-dat_samhsa_3 <- map_dfr(2008:2009, \(x) {
-  text_list <- list.files(path = here("data", "pdf", glue("{x}")),
-                          full.names = T)
-  future_map_dfr(text_list, grab_rev_08, .progress = T)
-}) %>%
-  mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
+# Grabbing 2008-2009 which came as zip files
+text_list2 <- map(2008:2009, \(x) 
+                 list.files(path = here("data", "pdf", x),
+                          full.names = T)) %>% 
+  unlist()
+  
+dat_samhsa_3 <- future_map_dfr(text_list2, grab_rev_08) %>% 
+  mutate(mh_blockgrant = str_remove_all(mh_blockgrant, "[:alpha:]"),
+         tot_smha = str_remove_all(tot_smha, "[:alpha:]"))
 
 # Function for 2007 tables
-grab_rev_07 <- possibly(function(text){
-  
-  print(text)
-  
-  text_matrix <- pdf_text(text) %>% 
-    str_subset("TABLE 2: State Mental Health Agency Controlled Revenues by Funding Source, FY 2005") 
-  
-  tibble(
-    state = str_extract(text_matrix, "(?<=\\n).+(?=\\n)"),
-    year = str_extract(text_matrix, "[:digit:]{4}"),
-    tot_smha = str_extract(text_matrix, 
-                           "(?<=[:digit:]{4} Total SMHA Mental Health Expenditures).+(?=\\n)"),
-    pc_smha = str_extract(text_matrix, 
-                          "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
-    mh_blockgrant = str_extract(text_matrix, 
-                                "(?<=Mental Health Block Grant).+(?=\\n)"),
-    mh_community = str_extract(text_matrix, 
-                               "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
-    mh_pc_community = str_extract(text_matrix, 
-                                  "(?<=Per Capita Community MH Expenditures).+(?=\\n)"),
-    mh_pct_community = str_extract(text_matrix, 
-                                   "(?<=Community Percent of Total SMHA Spending).+(?=\\n)")
-  ) %>% 
-    mutate(across(everything(), str_squish))
-},
-otherwise = tibble(state = "Error"))
+# grab_rev_07 <- possibly(function(text){
+#   
+#   print(text)
+#   
+#   text_matrix <- pdf_text(text) %>% 
+#     str_subset("TABLE 2: State Mental Health Agency Controlled Revenues by Funding Source, FY 2005") 
+#   
+#   tibble(
+#     state = str_extract(text_matrix, "(?<=\\n).+(?=\\n)"),
+#     year = str_extract(text_matrix, "(?<=Mental Health, FY )[:digit:]{4}"),
+#     tot_smha = str_extract(text_matrix, 
+#                            "(?<=[:digit:]{4} Total SMHA Mental Health Expenditures).+(?=\\n)"),
+#     pc_smha = str_extract(text_matrix, 
+#                           "(?<=Per Capita Total SMHA Mental Health Expenditures).+(?=\\n)"),
+#     mh_blockgrant = str_extract(text_matrix, 
+#                                 "(?<=Mental Health Block Grant).+(?=\\n)"),
+#     mh_community = str_extract(text_matrix, 
+#                                "(?<=SMHA Community MH Expenditures).+(?=\\n)"),
+#     mh_pc_community = str_extract(text_matrix, 
+#                                   "(?<=Per Capita Community MH Expenditures).+(?=\\n)"),
+#     mh_pct_community = str_extract(text_matrix, 
+#                                    "(?<=Community Percent of Total SMHA Spending).+(?=\\n)")
+#   ) %>% 
+#     mutate(across(everything(), str_squish))
+# },
+# otherwise = tibble(state = "Error"))
 
-# Grabbing 2007 which came as zip files
-dat_samhsa_3 <- map_dfr(2008:2009, \(x) {
-  text_list <- list.files(path = here("data", "pdf", glue("{x}")),
-                          full.names = T)
-  future_map_dfr(text_list, grab_rev_07, .progress = T)
-}) %>%
-  mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
+# # Grabbing 2007 which came as zip files
+# dat_samhsa_3 <- map_dfr(2008:2009, \(x) {
+#   text_list <- list.files(path = here("data", "pdf", glue("{x}")),
+#                           full.names = T)
+#   future_map_dfr(text_list, grab_rev_07, .progress = T)
+# }) %>%
+#   mutate(mh_blockgrant = str_extract(mh_blockgrant, "\\$[:graph:]*"))
 
 
     
@@ -303,11 +310,12 @@ dat_samhsa <- dat_samhsa_1 %>%
   arrange(state, year)
 
 # Saving
-saveRDS(dat_samhsa, here("data", "samhsa_data_2010_2011.Rds"))
+saveRDS(dat_samhsa, here("data", "samhsa_data_2007_2021.Rds"))
 
 
 # Coverage Check ---------------------------------------------------------
 
+# 2011 & 2016 missing, but look like they are covered b/c changes in reporting
 coverage <- dat_samhsa %>% 
   group_by(state) %>% 
   summarize(cov = list(unique(year)),
